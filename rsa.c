@@ -60,3 +60,55 @@ void print_keypair(const RSAKeyPair *keypair) {
     printf("\n\n");
 }
 
+int encrypt_message(const BIGNUM *plaintext, const RSAKeyPair *keypair, BIGNUM **ciphertext_out) {
+    BN_CTX *ctx = BN_CTX_new();
+    if (!ctx) {
+        fprintf(stderr, "BN_CTX_new failed.\n");
+        return 0;
+    }
+
+    BIGNUM *ciphertext = BN_new();
+    if (!ciphertext) {
+        fprintf(stderr, "BN_new failed.\n");
+        BN_CTX_free(ctx);
+        return 0;
+    }
+
+    if (!rsa_encrypt(plaintext, keypair->n, keypair->e, ciphertext, ctx)) {
+        fprintf(stderr, "Encryption failed.\n");
+        BN_free(ciphertext);
+        BN_CTX_free(ctx);
+        return 0;
+    }
+
+    *ciphertext_out = ciphertext;
+    BN_CTX_free(ctx);
+    return 1;
+}
+
+int decrypt_message(const BIGNUM *ciphertext, const RSAKeyPair *keypair, BIGNUM **plaintext_out) {
+    BN_CTX *ctx = BN_CTX_new();
+    if (!ctx) {
+        fprintf(stderr, "BN_CTX_new failed.\n");
+        return 0;
+    }
+
+    BIGNUM *plaintext = BN_new();
+    if (!plaintext) {
+        fprintf(stderr, "BN_new failed.\n");
+        BN_CTX_free(ctx);
+        return 0;
+    }
+
+    if (!rsa_decrypt(ciphertext, keypair->n, keypair->d, plaintext, ctx)) {
+        fprintf(stderr, "Decryption failed.\n");
+        BN_free(plaintext);
+        BN_CTX_free(ctx);
+        return 0;
+    }
+
+    *plaintext_out = plaintext;
+    BN_CTX_free(ctx);
+    return 1;
+}
+
