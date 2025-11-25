@@ -1,8 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 typedef unsigned long long u64;
 typedef __uint128_t u128;
+
+typedef struct {
+	u64 n;
+	u64 n_squared;
+	u64 g;
+} Paillier_pub_key;
+
+typedef struct {
+	u64 lambda;
+	u64 l_u;
+} Paillier_priv_key;
 
 u64 gcd_u64(u64 a, u64 b) {
 	while(b != 0) {
@@ -64,3 +76,41 @@ u64 mod_inv(u64 a, u64 m) {
 	return (u64)result;
 }
 
+//returns 0 as false(not prime), 1 for true(prime)
+int primality_test(u64 p) {
+	u64 sq_root = (u64)sqrt((double)p) + 1;
+	for(int i = 2; i <= sq_root; i++) {
+		if(p % i == 0) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+void paillier_keygen(u64 p, u64 q, Paillier_pub_key *pubKey, Paillier_priv_key *privKey) {
+	u64 n = p * q;
+	u64 n_squared = n * n;
+	u64 lambda = lcm_u64(p - 1, q - 1);
+	u64 g = n + 1;
+	u64 u = exp_mod(g, lambda, n_squared);
+
+	if((u - 1) % n != 0) {
+		fprintf(stderr, "L(u) is not an integer, something went wrong\n");
+		exit(1);
+	}
+
+	u64 L = (u - 1)/n;
+	u64 l_u = mod_inv(L, n);
+
+	pubKey->n = n;
+	pubKey->n_squared = n * n;
+	pubKey->g = g;
+
+	privKey->lambda = lambda;
+	privKey->l_u = l_u;
+}
+
+
+int main(void) {
+
+}
