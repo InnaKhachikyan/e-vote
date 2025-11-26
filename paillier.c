@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include "miller_rabin.h"
 
 typedef unsigned long long u64;
 typedef __uint128_t u128;
@@ -30,7 +31,7 @@ u64 lcm_u64(u64 a, u64 b) {
 }
 
 // to avoid overflow, I calculate multiplication by mod with u128 type
-u64 modmul(u64 a, u64 b, u64 mod) {
+u64 mod_mul(u64 a, u64 b, u64 mod) {
 	return (u128)a * (u128)b % (u128)mod;
 }
 
@@ -39,9 +40,9 @@ u64 exp_mod(u64 base, u64 exp, u64 mod) {
 	u64 x = base % mod;
 	while(exp > 0) {
 		if(exp & 1) {
-			result  =modmul(result, x, mod);
+			result  =mod_mul(result, x, mod);
 		}
-		x = modmul(x, x, mod);
+		x = mod_mul(x, x, mod);
 		exp >>= 1;
 	}
 	return result;
@@ -76,17 +77,6 @@ u64 mod_inv(u64 a, u64 m) {
 	return (u64)result;
 }
 
-//returns 0 as false(not prime), 1 for true(prime)
-int primality_test(u64 p) {
-	u64 sq_root = (u64)sqrt((double)p) + 1;
-	for(int i = 2; i <= sq_root; i++) {
-		if(p % i == 0) {
-			return 0;
-		}
-	}
-	return 1;
-}
-
 void paillier_keygen(u64 p, u64 q, Paillier_pub_key *pubKey, Paillier_priv_key *privKey) {
 	u64 n = p * q;
 	u64 n_squared = n * n;
@@ -110,6 +100,37 @@ void paillier_keygen(u64 p, u64 q, Paillier_pub_key *pubKey, Paillier_priv_key *
 	privKey->l_u = l_u;
 }
 
+// we assume r is in the range [1, n-1] and gcd(r,n)=1, encrypting m with r
+u64 paillier_encrypt(u64 m, u64 r, const Paillier_pub_key *pubKey) {
+	u64 n = pubKey->n;
+	u64 n_squared = pubKey->n_squared;
+	u64 g = pubKey->g;
+
+	m %= n;
+
+	u64 c1 = exp_mod(g, m, n_squared);
+	u64 c2 = exp_mod(r, n, n_squared);
+	u64 c = mod_mul(c1, c2, n_squared);
+
+	return c;
+}
+
+u64 paillier_decrypt(u64 c, const Paillier_pub_key *pubKey, const Paillier_priv_key *privKey) {
+	u64 n = pubKey->n;
+	u64 n_squared = pubKey->n_squared;
+	u64 lambda = privKey->lambda;
+	u64 l_u = privKey->l_u;
+
+	u64 u = exp_mod(c, lambda, n_squared);
+
+	if((u - 1) %n != 0) {
+		fprintf(stderr, "Decrypt: L(u) not integer, something went wrong\n");
+		exit(1);
+	}
+	u64 L = (u - 1)/n;
+	u64 m = mod_mul(L, l_u, n);
+	return m;
+}
 
 int main(void) {
 
