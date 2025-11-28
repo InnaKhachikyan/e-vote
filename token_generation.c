@@ -14,28 +14,6 @@
 #define NONCE_BYTES 16
 #define ELECTION_ID "AUA_policy_change_vote_2025"
 
-static void wait_for_enter(const char *prompt) {
-	struct termios oldt, newt;
-	printf("%s", prompt);
-	fflush(stdout);
-
-	if(tcgetattr(STDIN_FILENO, &oldt) == -1) {
-		int c;
-		while((c = getchar()) != '\n' && c != '\r' && c != EOF) { }
-		return;
-	}
-
-	newt = oldt;
-	newt.c_lflag &= ~(ICANON | ECHO);
-	tcsetattr(STDIN_FILENO, TCSANOW, & newt);
-
-	int c;
-	while((c = getchar()) != '\n' && c != '\r' && c != EOF) { }
-
-	tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-	printf("\n");
-}
-
 static int collect_mouse_entropy(double duration_seconds) {
 	unsigned char entropy_buffer[256];
 	size_t entropy_collected = 0;
@@ -176,27 +154,58 @@ static int init_random(void) {
 	return 1;
 }
 
+static int generate_token(unsigned char nonce[NONCE_BYTES], unsigned char token_hash[SHA256_DIGEST_LENGTH]) {
+	if(RAND_bytes(nonce, NONCE_BYTES) != 1) {
+		return 0;
+	}
+
+	const char *eid = ELECTION_ID;
+	size_t eid_len = strlen(eid);
+
+	unsigned char buf[256];
+	if(eid_len + NONCE_BYTES > sizeof(buf)) {
+		fprintf(stderr, "Internal buffer too small\n");
+		return 0;
+	}
+
+	memcpy(buf, eid, eid_len);
+	memcpy(buf + eid_len, nonce, NONCE_BYTES);
+
+	SHA256(buf, eid_len + NONCE_BYTES, token_hash);
+
+	memset(buf, 0, sizeof(buf));
+	return 1;
+}
+
 int main(void) {
-	printf("=== Token Generation RNG Test ===\n\n");
+    printf("=== Token Generation with RNG Test ===\n\n");
 
-	if (!init_random()) {
-		fprintf(stderr, "Failed to initialize RNG\n");
-		return 1;
-	}
+    if (!init_random()) {
+        fprintf(stderr, "Failed to initialize RNG\n");
+        return 1;
+    }
 
-	printf("Testing RNG by generating some random bytes:\n");
-	unsigned char test_bytes[32];
-	if (RAND_bytes(test_bytes, sizeof(test_bytes)) != 1) {
-		fprintf(stderr, "RAND_bytes failed\n");
-		return 1;
-	}
+    unsigned char nonce[NONCE_BYTES];
+    unsigned char token_hash[SHA256_DIGEST_LENGTH];
 
-	printf("Random bytes (hex): ");
-	for (size_t i = 0; i < sizeof(test_bytes); i++) {
-		printf("%02x", test_bytes[i]);
-	}
-	printf("\n\n");
+    if (!generate_token(nonce, token_hash)) {
+        fprintf(stderr, "Failed to generate token\n");
+        return 1;
+    }
 
-	printf("RNG test successful!\n");
-	return 0;
+    printf("Election ID: %s\n", ELECTION_ID);
+
+    printf("Random nonce (%d bytes): ", NONCE_BYTES);
+    for (int i = 0; i < NONCE_BYTES; i++) {
+        printf("%02x", nonce[i]);
+    }
+    printf("\n");
+
+    printf("Token = SHA256(ELECTION_ID || nonce): ");
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        printf("%02x", token_hash[i]);
+    }
+    printf("\n");
+
+    return 0;
 }
