@@ -177,6 +177,100 @@ static int generate_token(unsigned char nonce[NONCE_BYTES], unsigned char token_
 	return 1;
 }
 
+static int random_coprime(BIGNUM *r, const BIGNUM *N, BN_CTX *ctx) {
+    int res = 0;
+    BIGNUM *g = BN_new();
+    if (!g) return 0;
+
+    while (1) {
+        if (!BN_rand_range(r, N)) goto done;
+        if (BN_is_zero(r)) continue;
+
+        if (!BN_gcd(g, r, N, ctx)) goto done;
+        if (BN_is_one(g)) {
+            res = 1;
+            break;
+        }
+    }
+
+done:
+    BN_free(g);
+    return res;
+}
+
+static int blind_token(const BIGNUM *m, const BIGNUM *N, const BIGNUM *e, BIGNUM **r_out, BIGNUM **m_blinded_out, BN_CTX *ctx) {
+    int res = 0;
+    BIGNUM *r = NULL;
+    BIGNUM *re = NULL;
+    BIGNUM *m_blinded = NULL;
+
+    r = BN_new();
+    re = BN_new();
+    m_blinded = BN_new();
+    if (!r || !re || !m_blinded) goto done;
+
+    if (!random_coprime(r, N, ctx)) goto done;
+
+    if (!BN_mod_exp(re, r, e, N, ctx)) goto done;
+
+    if (!BN_mod_mul(m_blinded, m, re, N, ctx)) goto done;
+
+    *r_out = r;
+    *m_blinded_out = m_blinded;
+    res = 1;
+
+done:
+    if (!res) {
+        if (r) BN_free(r);
+        if (m_blinded) BN_free(m_blinded);
+    }
+    if (re) BN_free(re);
+    return res;
+}
+
+static int unblind_signature(const BIGNUM *s_blinded, const BIGNUM *r, const BIGNUM *N, BIGNUM **s_out, BN_CTX *ctx) {
+    int res = 0;
+    BIGNUM *rinv = NULL;
+    BIGNUM *s = NULL;
+
+    rinv = BN_mod_inverse(NULL, r, N, ctx); 
+    if (!rinv) goto done;
+
+    s = BN_new();
+    if (!s) goto done;
+
+    if (!BN_mod_mul(s, s_blinded, rinv, N, ctx)) goto done;
+
+    *s_out = s;
+    res = 1;
+
+done:
+    if (rinv) BN_free(rinv);
+    if (!res && s) BN_free(s);
+    return res;
+}
+
+static int verify_signature(const BIGNUM *m, const BIGNUM *s, const BIGNUM *N, const BIGNUM *e, BN_CTX *ctx) {
+    int res = 0;
+    BIGNUM *m_check = BN_new();
+    if (!m_check) return 0;
+
+    if (!BN_mod_exp(m_check, s, e, N, ctx)) {
+        BN_free(m_check);
+        return 0;
+    }
+
+    res = (BN_cmp(m_check, m) == 0);
+    BN_free(m_check);
+    return res;
+}
+
+static void print_bn_hex(const char *label, const BIGNUM *bn) {
+    printf("%s = 0x", label);
+    BN_print_fp(stdout, bn);
+    printf("\n");
+}
+
 int main(void) {
     printf("=== Token Generation with RNG Test ===\n\n");
 
