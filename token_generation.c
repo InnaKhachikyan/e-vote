@@ -10,6 +10,7 @@
 #include <time.h>
 #include <sys/select.h>
 #include <sys/time.h>
+#include "rsa.h"
 
 #define NONCE_BYTES 16
 #define ELECTION_ID "AUA_policy_change_vote_2025"
@@ -177,6 +178,30 @@ static int generate_token(unsigned char nonce[NONCE_BYTES], unsigned char token_
 	return 1;
 }
 
+static BIGNUM *token_hash_to_bn(const unsigned char token_hash[SHA256_DIGEST_LENGTH], const BIGNUM *N, BN_CTX *ctx) {
+    BIGNUM *m = BN_new();
+    if (!m) return NULL;
+
+    BN_bin2bn(token_hash, SHA256_DIGEST_LENGTH, m);
+
+    if (BN_cmp(m, N) >= 0) {
+        BIGNUM *tmp = BN_new();
+        if (!tmp) {
+            BN_free(m);
+            return NULL;
+        }
+        if (!BN_mod(tmp, m, N, ctx)) {
+            BN_free(m);
+            BN_free(tmp);
+            return NULL;
+        }
+        BN_free(m);
+        m = tmp;
+    }
+
+    return m;
+}
+
 static int random_coprime(BIGNUM *r, const BIGNUM *N, BN_CTX *ctx) {
     int res = 0;
     BIGNUM *g = BN_new();
@@ -271,19 +296,31 @@ static void print_bn_hex(const char *label, const BIGNUM *bn) {
     printf("\n");
 }
 
-int main(void) {
-    printf("=== Token Generation with RNG Test ===\n\n");
+int run_token_generation(const BIGNUM *N, const BIGNUM *e) {
+    printf("=== Token Generation + Blind Signature (Client) ===\n\n");
 
     if (!init_random()) {
         fprintf(stderr, "Failed to initialize RNG\n");
         return 1;
     }
 
+    BN_CTX *ctx = BN_CTX_new();
+    if (!ctx) {
+        fprintf(stderr, "BN_CTX_new failed\n");
+        return 1;
+    }
+
+    printf("Using public key:\n");
+    print_bn_hex("N", N);
+    print_bn_hex("e", e);
+    printf("\n");
+
     unsigned char nonce[NONCE_BYTES];
     unsigned char token_hash[SHA256_DIGEST_LENGTH];
 
     if (!generate_token(nonce, token_hash)) {
         fprintf(stderr, "Failed to generate token\n");
+        BN_CTX_free(ctx);
         return 1;
     }
 
@@ -295,11 +332,113 @@ int main(void) {
     }
     printf("\n");
 
-    printf("Token = SHA256(ELECTION_ID || nonce): ");
+    printf("Token hash = SHA256(ELECTION_ID || nonce): ");
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        printf("%02x", token_hash[i]);
+    }
+    printf("\n\n");
+
+    BIGNUM *m = token_hash_to_bn(token_hash, N, ctx);
+    if (!m) {
+        fprintf(stderr, "token_hash_to_bn failed\n");
+        BN_CTX_free(ctx);
+        return 1;
+    }
+    print_bn_hex("m (integer from token_hash)", m);
+    printf("\n");
+
+    BIGNUM *r = NULL;
+    BIGNUM *m_blinded = NULL;
+    if (!blind_token(m, N, e, &r, &m_blinded, ctx)) {
+        fprintf(stderr, "Blinding failed\n");
+        BN_free(m);
+        BN_CTX_free(ctx);
+        return 1;
+    }
+
+    printf("Blinding factor r (KEEP SECRET, hex without 0x):\n");
+    BN_print_fp(stdout, r);
+    printf("\n\n");
+
+    printf("Blinded token m' (give this to the authority for blind signing, hex without 0x):\n");
+    BN_print_fp(stdout, m_blinded);
+    printf("\n\n");
+
+    printf("Paste blind signature s' from authority (hex, without 0x), then ENTER:\n> ");
+    fflush(stdout);
+
+    char line[8192];
+    if (!fgets(line, sizeof(line), stdin)) {
+        fprintf(stderr, "No input read for s'.\n");
+        BN_free(r);
+        BN_free(m_blinded);
+        BN_free(m);
+        BN_CTX_free(ctx);
+        return 1;
+    }
+    size_t len = strlen(line);
+    while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) {
+        line[--len] = '\0';
+    }
+
+    BIGNUM *s_blinded = NULL;
+    if (!BN_hex2bn(&s_blinded, line)) {
+        fprintf(stderr, "Failed to parse s' as hex.\n");
+        BN_free(r);
+        BN_free(m_blinded);
+        BN_free(m);
+        BN_CTX_free(ctx);
+        return 1;
+    }
+
+    BIGNUM *s = NULL;
+    if (!unblind_signature(s_blinded, r, N, &s, ctx)) {
+        fprintf(stderr, "Unblinding failed\n");
+        BN_free(s_blinded);
+        BN_free(r);
+        BN_free(m_blinded);
+        BN_free(m);
+        BN_CTX_free(ctx);
+        return 1;
+    }
+
+    BN_free(s_blinded);
+    BN_free(r);
+    BN_free(m_blinded);
+
+    if (!verify_signature(m, s, N, e, ctx)) {
+        fprintf(stderr, "[ERROR] Signature verification FAILED.\n");
+        BN_free(s);
+        BN_free(m);
+        BN_CTX_free(ctx);
+        return 1;
+    }
+
+    BN_free(m);
+
+    printf("\n=== Final token the student must keep SAFE ===\n");
+    printf("Election ID: %s\n", ELECTION_ID);
+    printf("Nonce: ");
+    for (int i = 0; i < NONCE_BYTES; i++) {
+        printf("%02x", nonce[i]);
+    }
+    printf("\n");
+
+    printf("Token hash: ");
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
         printf("%02x", token_hash[i]);
     }
     printf("\n");
 
+    printf("Signature s on this token (hex, without 0x):\n");
+    BN_print_fp(stdout, s);
+    printf("\n");
+
+    printf("\n*** WARNING: Store nonce, token hash, and signature s securely. ***\n\n");
+
+    BN_free(s);
+    BN_CTX_free(ctx);
+
     return 0;
 }
+
