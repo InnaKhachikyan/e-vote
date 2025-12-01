@@ -3,7 +3,7 @@
 #include <math.h>
 #include <openssl/rand.h>
 #include "miller_rabin.h"
-#include <paillier.h>
+#include "paillier.h"
 
 typedef __uint128_t u128;
 
@@ -162,6 +162,7 @@ u64 random_coprime(u64 n) {
     }
 }
 
+/*
 int main(void) {
     if (RAND_status() != 1) {
         if (RAND_poll() != 1) {
@@ -250,3 +251,4 @@ int main(void) {
     free(ciphertexts);
     return 0;
 }
+*/

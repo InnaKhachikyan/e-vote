@@ -3,6 +3,6 @@
 
 #include <openssl/bn.h>
 
-int run_token_generation(BIGNUM *g_public_n, BIGNUM *g_public_e);
+int run_token_generation(const BIGNUM *g_public_n, const BIGNUM *g_public_e);
 
 #endif
