@@ -11,6 +11,7 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include "rsa.h"
+#include "token_generation.h"
 
 #define NONCE_BYTES 16
 #define ELECTION_ID "AUA_policy_change_vote_2025"
