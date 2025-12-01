@@ -116,3 +116,97 @@ int system_blind_sign(const BIGNUM *m_blinded, BIGNUM **s_blinded_out) {
     return 1;
 }
 
+int main(void) {
+	if (!rsa_generate_keypair(&g_public_n, &g_public_e, &s_private_d, 2048)) {
+        fprintf(stderr, "Key generation failed.\n");
+        free_keys();
+        return EXIT_FAILURE;
+    }
+
+	printf("\n=== Public Key for Voting System ===\n");
+printf("N (hex): ");
+BN_print_fp(stdout, g_public_n);
+printf("\n");
+printf("e (hex): ");
+BN_print_fp(stdout, g_public_e);
+printf("\n\n");
+
+    printf("Registration system initialized.\n");
+    printf("RSA public key generated (n, e).\n");
+    printf("Private key kept locally (static).\n");
+    printf("Voting will stop when either:\n");
+    printf("  - all %d students have generated a token, or\n", NUM_STUDENTS);
+    printf("  - %d minutes have passed since start.\n\n", VOTING_DURATION_SECONDS / 60);
+
+    time_t start_time = time(NULL);
+    if (start_time == (time_t)-1) {
+        fprintf(stderr, "time() failed.\n");
+        free_keys();
+        return EXIT_FAILURE;
+    }
+
+    char input_buf[128];
+
+    while (1) {
+        time_t now = time(NULL);
+        if (now == (time_t)-1) {
+            fprintf(stderr, "time() failed.\n");
+            break;
+        }
+
+        double elapsed = difftime(now, start_time);
+        if (elapsed >= VOTING_DURATION_SECONDS) {
+            printf("\nTime limit (15 minutes) reached. Voting is now closed.\n");
+            break;
+        }
+
+        if (all_students_done()) {
+            printf("\nAll students in the list have generated their tokens. Voting is now closed.\n");
+            break;
+        }
+
+        printf("Enter student ID: ");
+        fflush(stdout);
+
+        if (!fgets(input_buf, sizeof(input_buf), stdin)) {
+            printf("\nEnd of input detected. Terminating.\n");
+            break;
+        }
+
+        size_t len = strlen(input_buf);
+        if (len > 0 && (input_buf[len - 1] == '\n' || input_buf[len - 1] == '\r')) {
+            input_buf[len - 1] = '\0';
+            len--;
+        }
+
+        if (len == 0) {
+            continue;
+        }
+
+        int idx = find_student_index(input_buf);
+        if (idx < 0) {
+            printf("Unknown student ID: %s\n\n", input_buf);
+            continue;
+        }
+
+        if (token_generated[idx]) {
+            printf("Token for student ID %s has already been generated earlier.\n\n", input_buf);
+            continue;
+        }
+
+        printf("Starting token generation for student ID %s...\n", input_buf);
+
+        int rc = run_token_generation(g_public_n, g_public_e);
+        if (rc != 0) {
+            fprintf(stderr, "Token generation failed for student ID %s (rc = %d).\n\n", input_buf, rc);
+            continue;
+        }
+
+        token_generated[idx] = true;
+        printf("Token for student ID %s has been successfully generated.\n\n", input_buf);
+    }
+
+    free_keys();
+    return EXIT_SUCCESS;
+}
+
