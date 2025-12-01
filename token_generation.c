@@ -15,6 +15,8 @@
 #define NONCE_BYTES 16
 #define ELECTION_ID "AUA_policy_change_vote_2025"
 
+int system_blind_sign(const BIGNUM *m_blinded, BIGNUM **s_blinded_out);
+
 static int collect_mouse_entropy(double duration_seconds) {
 	unsigned char entropy_buffer[256];
 	size_t entropy_collected = 0;
@@ -75,7 +77,7 @@ static int collect_mouse_entropy(double duration_seconds) {
 			entropy_buffer[entropy_collected++] = (unsigned char)(ts.tv_nsec & 0xFF);
 		}
 
-		usleep(10000); // delay
+		usleep(10000);
 	}
 
 	printf(" done!\n");
@@ -174,7 +176,7 @@ static int generate_token(unsigned char nonce[NONCE_BYTES], unsigned char token_
 
 	SHA256(buf, eid_len + NONCE_BYTES, token_hash);
 
-	memset(buf, 0, sizeof(buf));
+memset(buf, 0, sizeof(buf));
 	return 1;
 }
 
@@ -258,7 +260,7 @@ static int unblind_signature(const BIGNUM *s_blinded, const BIGNUM *r, const BIG
     BIGNUM *rinv = NULL;
     BIGNUM *s = NULL;
 
-    rinv = BN_mod_inverse(NULL, r, N, ctx); 
+    rinv = BN_mod_inverse(NULL, r, N, ctx);
     if (!rinv) goto done;
 
     s = BN_new();
@@ -364,26 +366,9 @@ int run_token_generation(const BIGNUM *N, const BIGNUM *e) {
     BN_print_fp(stdout, m_blinded);
     printf("\n\n");
 
-    printf("Paste blind signature s' from authority (hex, without 0x), then ENTER:\n> ");
-    fflush(stdout);
-
-    char line[8192];
-    if (!fgets(line, sizeof(line), stdin)) {
-        fprintf(stderr, "No input read for s'.\n");
-        BN_free(r);
-        BN_free(m_blinded);
-        BN_free(m);
-        BN_CTX_free(ctx);
-        return 1;
-    }
-    size_t len = strlen(line);
-    while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) {
-        line[--len] = '\0';
-    }
-
     BIGNUM *s_blinded = NULL;
-    if (!BN_hex2bn(&s_blinded, line)) {
-        fprintf(stderr, "Failed to parse s' as hex.\n");
+    if (!system_blind_sign(m_blinded, &s_blinded)) {
+        fprintf(stderr, "system_blind_sign failed\n");
         BN_free(r);
         BN_free(m_blinded);
         BN_free(m);
@@ -441,4 +426,4 @@ int run_token_generation(const BIGNUM *N, const BIGNUM *e) {
 
     return 0;
 }
-
+	
