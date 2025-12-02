@@ -3,11 +3,14 @@
 #include <stdbool.h>
 #include <time.h>
 #include <string.h>
+#include <openssl/bn.h>
+#include <curl/curl.h>
 #include "rsa.h"
 #include "token_generation.h"
+#include "authentication.h"
 
 #define VOTING_DURATION_SECONDS (15 * 60)
-#define NUM_STUDENTS 38
+#define NUM_STUDENTS 37
 
 BIGNUM *g_public_n = NULL;
 BIGNUM *g_public_e = NULL;
@@ -29,7 +32,6 @@ static const char *STUDENT_IDS[] = {
     "meri_gasparyan",
     "milena_ghazaryan",
     "levon_ghukasyan",
-    "yeghiazar_grigoryan",
     "karine_grigoryan",
     "anna_hakhnazaryan",
     "davit_hakobyan",
@@ -50,28 +52,49 @@ static const char *STUDENT_IDS[] = {
     "mikayel_yeganyan",
     "anahit_yeghiazaryan",
     "sedrak_yerznkyan",
-    "khachik_zakaryan"
+    "khachik_zakaryan",
+    "sergey_abrahamyan"
 };
 
-bool token_generated[NUM_STUDENTS] = {false};
-
-static int find_student_index(const char *id) {
-    for (int i = 0; i < NUM_STUDENTS; i++) {
-        if (strcmp(STUDENT_IDS[i], id) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-static bool all_students_done(void) {
-    for (int i = 0; i < NUM_STUDENTS; i++) {
-        if (!token_generated[i]) {
-            return false;
-        }
-    }
-    return true;
-}
+static const char *STUDENT_MAILS[] = {
+    "arthur_aghamyan@edu.aua.am",
+    "nane_andreasyan@edu.aua.am",
+    "eduard_aramyan@edu.aua.am",
+    "artashes_atanesyan@edu.aua.am",
+    "alik_avakyan@edu.aua.am",
+    "lilit_babakhanyan@edu.aua.am",
+    "erik_badalyan@edu.aua.am",
+    "anahit_baghramyan@edu.aua.am",
+    "hrach_davtyan@edu.aua.am",
+    "mikayel_davtyan@edu.aua.am",
+    "narek_galstyan@edu.aua.am",
+    "sofiya_gasparyan@edu.aua.am",
+    "meri_gasparyan@edu.aua.am",
+    "milena_ghazaryan@edu.aua.am",
+    "levon_ghukasyan@edu.aua.am",
+    "karine_grigoryan@edu.aua.am",
+    "anna_hakhnazaryan@edu.aua.am",
+    "davit_hakobyan@edu.aua.am",
+    "vahe_hayrapetyan@edu.aua.am",
+    "ruzanna_hunanyan@edu.aua.am",
+    "vahe_jraghatspanyan@edu.aua.am",
+    "inna_khachikyan@edu.aua.am",
+    "siranush_makhmuryan@edu.aua.am",
+    "anush_margaryan@edu.aua.am",
+    "yevgine_mnatsakanyan@edu.aua.am",
+    "narek_otaryan@edu.aua.am",
+    "vahe_sahakyan@edu.aua.am",
+    "davit_sahakyan@edu.aua.am",
+    "vahe_sargsyan@edu.aua.am",
+    "ruben_sargsyan@edu.aua.am",
+    "ararat_saribekyan@edu.aua.am",
+    "diana_stepanyan@edu.aua.am",
+    "mikayel_yeganyan@edu.aua.am",
+    "anahit_yeghiazaryan@edu.aua.am",
+    "sedrak_yerznkyan@edu.aua.am",
+    "khachik_zakaryan@edu.aua.am",
+    "sabrahamyan@aua.am"
+};
 
 static void free_keys(void) {
     if (g_public_n) {
@@ -87,7 +110,6 @@ static void free_keys(void) {
         s_private_d = NULL;
     }
 }
-
 
 int system_blind_sign(const BIGNUM *m_blinded, BIGNUM **s_blinded_out) {
     if (!m_blinded || !s_private_d || !g_public_n || !s_blinded_out) {
@@ -117,24 +139,36 @@ int system_blind_sign(const BIGNUM *m_blinded, BIGNUM **s_blinded_out) {
 }
 
 int main(void) {
-	if (!rsa_generate_keypair(&g_public_n, &g_public_e, &s_private_d, 2048)) {
+    srand((unsigned int)time(NULL));
+
+    if (!rsa_generate_keypair(&g_public_n, &g_public_e, &s_private_d, 2048)) {
         fprintf(stderr, "Key generation failed.\n");
         free_keys();
         return EXIT_FAILURE;
     }
 
-	printf("\n=== Public Key for Voting System ===\n");
-printf("N (hex): ");
-BN_print_fp(stdout, g_public_n);
-printf("\n");
-printf("e (hex): ");
-BN_print_fp(stdout, g_public_e);
-printf("\n\n");
+    printf("\n=== Public Key for Voting System ===\n");
+    printf("N (hex): ");
+    BN_print_fp(stdout, g_public_n);
+    printf("\n");
+    printf("e (hex): ");
+    BN_print_fp(stdout, g_public_e);
+    printf("\n\n");
+
+    for (int i = 0; i < NUM_STUDENTS; i++) {
+        if (auth_add_student(STUDENT_IDS[i], STUDENT_MAILS[i]) != 0) {
+            fprintf(stderr, "Failed to add student %s\n", STUDENT_IDS[i]);
+            free_keys();
+            return EXIT_FAILURE;
+        }
+    }
+
+    auth_sort_students();
 
     printf("Registration system initialized.\n");
     printf("RSA public key generated (n, e).\n");
     printf("Private key kept locally (static).\n");
-    printf("Voting will stop when either:\n");
+    printf("Registration will stop when either:\n");
     printf("  - all %d students have generated a token, or\n", NUM_STUDENTS);
     printf("  - %d minutes have passed since start.\n\n", VOTING_DURATION_SECONDS / 60);
 
@@ -156,12 +190,12 @@ printf("\n\n");
 
         double elapsed = difftime(now, start_time);
         if (elapsed >= VOTING_DURATION_SECONDS) {
-            printf("\nTime limit (15 minutes) reached. Voting is now closed.\n");
+            printf("\nTime limit (15 minutes) reached. Registration is now closed.\n");
             break;
         }
 
-        if (all_students_done()) {
-            printf("\nAll students in the list have generated their tokens. Voting is now closed.\n");
+        if (auth_all_tokens_generated()) {
+            printf("\nAll students in the list have generated their tokens. Registration is now closed.\n");
             break;
         }
 
@@ -183,18 +217,18 @@ printf("\n\n");
             continue;
         }
 
-        int idx = find_student_index(input_buf);
-        if (idx < 0) {
-            printf("Unknown student ID: %s\n\n", input_buf);
+        int auth_result = auth_email_verify(input_buf);
+
+        if (auth_result == 2) {
             continue;
         }
 
-        if (token_generated[idx]) {
-            printf("Token for student ID %s has already been generated earlier.\n\n", input_buf);
+        if (auth_result == 1) {
+            printf("Worng verification code\n\n");
             continue;
         }
 
-        printf("Starting token generation for student ID %s...\n", input_buf);
+        printf("Verification successful. Starting token generation for student ID %s...\n", input_buf);
 
         int rc = run_token_generation(g_public_n, g_public_e);
         if (rc != 0) {
@@ -202,7 +236,13 @@ printf("\n\n");
             continue;
         }
 
-        token_generated[idx] = true;
+        Student *s = auth_find_student(input_buf);
+        if (!s) {
+            fprintf(stderr, "Internal error: student not found after verification.\n\n");
+            continue;
+        }
+
+        s->token_generated = true;
         printf("Token for student ID %s has been successfully generated.\n\n", input_buf);
     }
 
