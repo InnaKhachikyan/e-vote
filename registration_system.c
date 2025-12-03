@@ -9,7 +9,7 @@
 #include "token_generation.h"
 #include "authentication.h"
 
-#define VOTING_DURATION_SECONDS (15 * 60)
+#define VOTING_DURATION_SECONDS (2 * 60)
 #define NUM_STUDENTS 37
 
 BIGNUM *g_public_n = NULL;
@@ -96,30 +96,61 @@ static const char *STUDENT_MAILS[] = {
     "sabrahamyan@aua.am"
 };
 
+static char *token_registry[NUM_STUDENTS] = {NULL};
+
 static void free_keys(void) {
-    if (g_public_n) {
-        BN_free(g_public_n);
-        g_public_n = NULL;
+    if (g_public_n) BN_free(g_public_n);
+    if (g_public_e) BN_free(g_public_e);
+    if (s_private_d) BN_free(s_private_d);
+    g_public_n = g_public_e = s_private_d = NULL;
+}
+
+int register_token(const char *token_hex) {
+    if (!token_hex || !token_hex[0]) return 0;
+    for (int i = 0; i < NUM_STUDENTS; i++) {
+        if (token_registry[i] == NULL) {
+            token_registry[i] = strdup(token_hex);
+            return token_registry[i] != NULL;
+        }
     }
-    if (g_public_e) {
-        BN_free(g_public_e);
-        g_public_e = NULL;
+    return 0;
+}
+
+int use_token(const char *token_hex) {
+    if (!token_hex || !token_hex[0]) return 0;
+    for (int i = 0; i < NUM_STUDENTS; i++) {
+        if (token_registry[i] && strcmp(token_registry[i], token_hex) == 0) {
+            free(token_registry[i]);
+            token_registry[i] = NULL;
+            return 1;
+        }
     }
-    if (s_private_d) {
-        BN_free(s_private_d);
-        s_private_d = NULL;
+    return 0;
+}
+
+static void dump_tokens_to_file(void) {
+    FILE *f = fopen("tokens.txt", "w");
+    if (f) {
+        for (int i = 0; i < NUM_STUDENTS; i++) {
+            if (token_registry[i]) {
+                fprintf(f, "%s\n", token_registry[i]);
+            }
+        }
+        fclose(f);
+    }
+    for (int i = 0; i < NUM_STUDENTS; i++) {
+        if (token_registry[i]) {
+            free(token_registry[i]);
+            token_registry[i] = NULL;
+        }
     }
 }
 
 int system_blind_sign(const BIGNUM *m_blinded, BIGNUM **s_blinded_out) {
-    if (!m_blinded || !s_private_d || !g_public_n || !s_blinded_out) {
-        return 0;
-    }
+    if (!m_blinded || !s_private_d || !g_public_n || !s_blinded_out) return 0;
 
     BN_CTX *ctx = BN_CTX_new();
-    if (!ctx) {
-        return 0;
-    }
+    if (!ctx) return 0;
 
     BIGNUM *s = BN_new();
     if (!s) {
@@ -139,6 +170,11 @@ int system_blind_sign(const BIGNUM *m_blinded, BIGNUM **s_blinded_out) {
 }
 
 int main(void) {
+    if (atexit(dump_tokens_to_file) != 0) {
+        fprintf(stderr, "Failed to register atexit handler\n");
+        return EXIT_FAILURE;
+    }
+
     srand((unsigned int)time(NULL));
 
     if (!rsa_generate_keypair(&g_public_n, &g_public_e, &s_private_d, 2048)) {
@@ -179,7 +215,7 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    char input_buf[128];
+    char input_buf[256];
 
     while (1) {
         time_t now = time(NULL);
