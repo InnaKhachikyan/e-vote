@@ -10,7 +10,7 @@
 #include "authentication.h"
 
 #define VOTING_DURATION_SECONDS (2 * 60)
-#define NUM_STUDENTS 37
+#define NUM_STUDENTS 38
 
 BIGNUM *g_public_n = NULL;
 BIGNUM *g_public_e = NULL;
@@ -53,7 +53,7 @@ static const char *STUDENT_IDS[] = {
     "anahit_yeghiazaryan",
     "sedrak_yerznkyan",
     "khachik_zakaryan",
-    "sergey_abrahamyan"
+    "sergey_abrahamyan",
 };
 
 static const char *STUDENT_MAILS[] = {
@@ -93,7 +93,7 @@ static const char *STUDENT_MAILS[] = {
     "anahit_yeghiazaryan@edu.aua.am",
     "sedrak_yerznkyan@edu.aua.am",
     "khachik_zakaryan@edu.aua.am",
-    "sabrahamyan@aua.am"
+    "sabrahamyan@aua.am",
 };
 
 static char *token_registry[NUM_STUDENTS] = {NULL};
@@ -128,16 +128,35 @@ int use_token(const char *token_hex) {
     return 0;
 }
 
-static void dump_tokens_to_file(void) {
-    FILE *f = fopen("tokens.txt", "w");
-    if (f) {
-        for (int i = 0; i < NUM_STUDENTS; i++) {
-            if (token_registry[i]) {
-                fprintf(f, "%s\n", token_registry[i]);
-            }
-        }
-        fclose(f);
+static int write_token_immediately(const char *token_hex) {
+    if (!token_hex || !token_hex[0]) {
+        fprintf(stderr, "Invalid token provided for writing\n");
+        return 0;
     }
+
+    FILE *f = fopen("tokens.txt", "a");
+    if (!f) {
+        fprintf(stderr, "ERROR: Failed to open tokens.txt for writing\n");
+        perror("fopen");
+        return 0;
+    }
+
+    if (fprintf(f, "%s\n", token_hex) < 0) {
+        fprintf(stderr, "ERROR: Failed to write token to file\n");
+        fclose(f);
+        return 0;
+    }
+
+    if (fflush(f) != 0) {
+        fprintf(stderr, "WARNING: Failed to flush token to disk\n");
+    }
+
+    fclose(f);
+    printf("Token written to tokens.txt\n");
+    return 1;
+}
+
+static void cleanup_token_registry(void) {
     for (int i = 0; i < NUM_STUDENTS; i++) {
         if (token_registry[i]) {
             free(token_registry[i]);
@@ -170,7 +189,7 @@ int system_blind_sign(const BIGNUM *m_blinded, BIGNUM **s_blinded_out) {
 }
 
 int main(void) {
-    if (atexit(dump_tokens_to_file) != 0) {
+    if (atexit(cleanup_token_registry) != 0) {
         fprintf(stderr, "Failed to register atexit handler\n");
         return EXIT_FAILURE;
     }
@@ -226,7 +245,7 @@ int main(void) {
 
         double elapsed = difftime(now, start_time);
         if (elapsed >= VOTING_DURATION_SECONDS) {
-            printf("\nTime limit (15 minutes) reached. Registration is now closed.\n");
+            printf("\nTime limit (%d minutes) reached. Registration is now closed.\n", VOTING_DURATION_SECONDS/60);
             break;
         }
 
@@ -266,9 +285,22 @@ int main(void) {
 
         printf("Verification successful. Starting token generation for student ID %s...\n", input_buf);
 
-        int rc = run_token_generation(g_public_n, g_public_e);
+        char *token_hex = NULL;
+        int rc = run_token_generation(g_public_n, g_public_e, &token_hex);
         if (rc != 0) {
             fprintf(stderr, "Token generation failed for student ID %s (rc = %d).\n\n", input_buf, rc);
+            continue;
+        }
+
+        if (token_hex) {
+            if (!write_token_immediately(token_hex)) {
+                fprintf(stderr, "CRITICAL ERROR: Token generated but failed to save to file for student ID %s!\n", input_buf);
+                fprintf(stderr, "Token: %s\n", token_hex);
+                fprintf(stderr, "Please save this token manually!\n\n");
+            }
+            free(token_hex);
+        } else {
+            fprintf(stderr, "Token generation returned success but no token was created.\n\n");
             continue;
         }
 
@@ -279,7 +311,7 @@ int main(void) {
         }
 
         s->token_generated = true;
-        printf("Token for student ID %s has been successfully generated.\n\n", input_buf);
+        printf("Token for student ID %s has been successfully generated and saved.\n\n", input_buf);
     }
 
     free_keys();

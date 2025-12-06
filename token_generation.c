@@ -299,7 +299,7 @@ static void print_bn_hex(const char *label, const BIGNUM *bn) {
     printf("\n");
 }
 
-int run_token_generation(const BIGNUM *N, const BIGNUM *e) {
+int run_token_generation(const BIGNUM *N, const BIGNUM *e, char **token_out) {
     printf("=== Token Generation + Blind Signature (Client) ===\n\n");
 
     if (!init_random()) {
@@ -421,6 +421,23 @@ int run_token_generation(const BIGNUM *N, const BIGNUM *e) {
     printf("\n");
 
     printf("\n*** WARNING: Store nonce, token hash, and signature s securely. ***\n\n");
+
+    if (token_out) {
+        char *token_hex = malloc(SHA256_DIGEST_LENGTH * 2 + 1);
+        if (!token_hex) {
+            fprintf(stderr, "Failed to allocate memory for token\n");
+            BN_free(s);
+            BN_CTX_free(ctx);
+            return 1;
+        }
+
+        for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+            sprintf(token_hex + (i * 2), "%02x", token_hash[i]);
+        }
+        token_hex[SHA256_DIGEST_LENGTH * 2] = '\0';
+
+        *token_out = token_hex;
+    }
 
     BN_free(s);
     BN_CTX_free(ctx);

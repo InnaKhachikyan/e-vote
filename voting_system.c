@@ -10,7 +10,7 @@
 
 #define NONCE_BYTES 16
 #define MAX_VOTERS 38
-#define VOTING_DURATION_SECONDS (10 * 60)
+#define VOTING_DURATION_SECONDS (2 * 60)
 
 static int hexchar_to_val(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -75,6 +75,74 @@ static int verify_signature(const BIGNUM *m, const BIGNUM *s,
     res = (BN_cmp(m_check, m) == 0);
     BN_free(m_check);
     return res;
+}
+
+static void trim_newline(char *s) {
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == '\n' || s[len - 1] == '\r')) {
+        s[--len] = '\0';
+    }
+}
+
+static int token_exists(const char *token_hex) {
+    FILE *f = fopen("tokens.txt", "r");
+    if (!f) return 0;
+
+    char line[512];
+    int found = 0;
+
+    while (fgets(line, sizeof(line), f)) {
+        trim_newline(line);
+        if (line[0] == '\0') continue;
+        if (strcmp(line, token_hex) == 0) {
+            found = 1;
+            break;
+        }
+    }
+
+    fclose(f);
+    return found;
+}
+
+static int remove_token(const char *token_hex) {
+    FILE *fin = fopen("tokens.txt", "r");
+    if (!fin) return 0;
+
+    FILE *fout = fopen("tokens.tmp", "w");
+    if (!fout) {
+        fclose(fin);
+        return 0;
+    }
+
+    char line[512];
+    int removed = 0;
+
+    while (fgets(line, sizeof(line), fin)) {
+        trim_newline(line);
+        if (line[0] == '\0') continue;
+        if (!removed && strcmp(line, token_hex) == 0) {
+            removed = 1;
+            continue;
+        }
+        fprintf(fout, "%s\n", line);
+    }
+
+    fclose(fin);
+    fclose(fout);
+
+    if (!removed) {
+        remove("tokens.tmp");
+        return 0;
+    }
+
+    if (remove("tokens.txt") != 0) {
+        return 0;
+    }
+    if (rename("tokens.tmp", "tokens.txt") != 0) {
+        return 0;
+    }
+
+    return 1;
 }
 
 int main(int argc, char *argv[]) {
@@ -175,6 +243,7 @@ int main(int argc, char *argv[]) {
         printf("\n=== Voter %llu ===\n", (unsigned long long)(valid_votes + 1));
 
         char buf[4096];
+        char token_hex[2 * SHA256_DIGEST_LENGTH + 1];
 
         unsigned char nonce[NONCE_BYTES];
         unsigned char token_hash[SHA256_DIGEST_LENGTH];
@@ -198,6 +267,16 @@ int main(int argc, char *argv[]) {
         }
         if (!parse_fixed_hex(buf, token_hash, SHA256_DIGEST_LENGTH)) {
             fprintf(stderr, "Invalid token hash hex length/format\n");
+            continue;
+        }
+
+        for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+            sprintf(&token_hex[2 * i], "%02x", token_hash[i]);
+        }
+        token_hex[2 * SHA256_DIGEST_LENGTH] = '\0';
+
+        if (!token_exists(token_hex)) {
+            fprintf(stderr, "Token not registered or already used, vote rejected\n");
             continue;
         }
 
@@ -260,6 +339,10 @@ int main(int argc, char *argv[]) {
 
         C_tally = mod_mul(C_tally, ciph, pub.n_squared);
         valid_votes++;
+
+        if (!remove_token(token_hex)) {
+            fprintf(stderr, "Warning: failed to erase token from tokens.txt\n");
+        }
     }
 
     printf("\n=== Published encrypted votes (ciphertexts) ===\n");

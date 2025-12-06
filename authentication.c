@@ -35,7 +35,6 @@ int send_email_via_marleyfetch(const char *auth_token, const char *to, const cha
              "}",
              to, subject, text_body);
 
-    printf("\n--- Sending Email Request JSON ---\n%s\n---------------------------------\n", json_data);
     curl_easy_setopt(curl, CURLOPT_URL, "https://marleyfetch.com/api/send");
 
     struct curl_slist *headers = NULL;
